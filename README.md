@@ -69,3 +69,27 @@ without error, and is free of clippy errors.
 send a message to the server from the client. Make sure that niether the server
 or client exit with a failure. This action should be run anytime new code
 is pushed to a branch or landed on the main branch.
+
+## Run pre-commit hook:
+```
+sh .githooks/pre-commit
+```
+
+## Run tests:
+```
+cargo test
+```
+
+## Launch server:
+```
+cargo run --bin server 0.0.0.0:<port>
+```
+
+## Launch client:
+```
+cargo run --bin client ws://<ip>:<port> <username>
+```
+
+## GitHub Actions
+
+The GitHub Actions workflow is defined in `.github/workflows/ci.yml`. It will run the server and client and check if the client can send a message to the server.
