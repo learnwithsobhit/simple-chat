@@ -85,6 +85,7 @@ async fn handle_connection(
     raw_stream: TcpStream,
     addr: SocketAddr,
     tx: broadcast::Sender<ServerMessage>,
+    tx_close: broadcast::Sender<Message>,
 ) {
     info!("Incoming TCP connection from: {}", addr);
 
@@ -94,6 +95,7 @@ async fn handle_connection(
     info!("WebSocket connection established: {}", addr);
 
     let mut rx = tx.subscribe(); // Each client gets a subscription
+    let mut rx_close = tx_close.subscribe();
     let (mut outgoing, mut incoming) = ws_stream.split();
     loop {
         tokio::select! {
@@ -159,6 +161,17 @@ async fn handle_connection(
                     }
                 }
             }
+            Ok(message) = rx_close.recv() => { //this is for ctrl+c
+                if peer_map.get(&addr).is_some() {
+                    let _ = outgoing
+                        .send(message)
+                        .await;
+                    peer_map.remove(&addr);
+                    info!("Server shutdown");
+                    let _ = outgoing.close().await;
+                    break;
+                }
+            }
 
             else => {
                 if let Some(username) = peer_map.get(&addr) {
@@ -166,6 +179,7 @@ async fn handle_connection(
                     info!("{:?} disconnected", username);
                 }
                 peer_map.remove(&addr);
+                let _ = outgoing.close().await;
                 break;
             }
         }
@@ -194,21 +208,46 @@ async fn main() -> Result<()> {
     let try_socket = TcpListener::bind(&addr).await;
     let listener = try_socket.expect("Failed to bind");
     let (tx, _) = broadcast::channel::<ServerMessage>(100); // Broadcast channel for messages
-
+    let (tx_close, _) = broadcast::channel::<Message>(100);
     println!("Listening on: {}", addr);
-    tokio::spawn(handle_ctrl_c(tx.clone()));
+    // tokio::spawn(handle_ctrl_c(tx_close.clone()));
     // Let's spawn the handling of each connection in a separate task.
-    while let Ok((stream, addr)) = listener.accept().await {
-        tokio::spawn(handle_connection(state.clone(), stream, addr, tx.clone()));
+    // while let Ok((stream, addr)) = listener.accept().await {
+    //     tokio::spawn(handle_connection(
+    //         state.clone(),
+    //         stream,
+    //         addr,
+    //         tx.clone(),
+    //         tx_close.clone(),
+    //     ));
+    // }
+    // println!("Server shutdown");
+    loop {
+        tokio::select! {
+            Ok((stream, addr)) = listener.accept() => {
+                tokio::spawn(handle_connection(
+                    state.clone(),
+                    stream,
+                    addr,
+                    tx.clone(),
+                    tx_close.clone(),
+                ));
+            }
+            _ = handle_ctrl_c(tx_close.clone()) => {
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                break;
+            }
+        }
     }
-    info!("Server shutdown");
     Ok(())
 }
 
-async fn handle_ctrl_c(_tx: broadcast::Sender<ServerMessage>) {
+async fn handle_ctrl_c(tx_close: broadcast::Sender<Message>) {
     signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
     info!("Received Ctrl+C, sending leave message.");
-    std::process::exit(0);
+    let _ = tx_close.send(Message::Close(None));
+    // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    // std::process::exit(0);
 }
 
 #[cfg(test)]
@@ -298,11 +337,11 @@ mod tests {
 
         let peer_map = Arc::new(DashMap::new());
         let (tx, _) = broadcast::channel::<ServerMessage>(100);
-
+        let (tx_close, _) = broadcast::channel::<Message>(100);
         // Spawn the server handler
         let handle = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            handle_connection(peer_map, stream, addr, tx).await;
+            handle_connection(peer_map, stream, addr, tx, tx_close).await;
         });
 
         // Connect a mock client
@@ -337,6 +376,7 @@ mod tests {
         // Close the connection
         write.close().await.unwrap();
         handle.abort();
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
 
     #[tokio::test]
@@ -344,21 +384,22 @@ mod tests {
         use futures_util::StreamExt;
         use tokio::net::TcpListener;
         use tokio_tungstenite::connect_async;
-
         // Setup a mock server
         let listener = TcpListener::bind("127.0.0.1:12345").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
         let peer_map = Arc::new(DashMap::new());
         let (tx, _) = broadcast::channel::<ServerMessage>(100);
+        let (tx_close, _) = broadcast::channel::<Message>(100);
 
         // Spawn the server handler
         let server_handle = tokio::spawn(async move {
             while let Ok((stream, client_addr)) = listener.accept().await {
                 let peer_map = peer_map.clone();
                 let tx = tx.clone();
+                let tx_close = tx_close.clone();
                 tokio::spawn(async move {
-                    handle_connection(peer_map, stream, client_addr, tx).await;
+                    handle_connection(peer_map, stream, client_addr, tx, tx_close).await;
                 });
             }
         });

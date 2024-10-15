@@ -164,7 +164,7 @@ async fn main() {
             if let Ok(message) = message {
                 if message.is_close() {
                     info!("Server closed the connection");
-                    return;
+                    std::process::exit(0);
                 }
                 let server_message = String::from_utf8(message.clone().into_data());
                 if let Ok(msg) = ServerMessage::from_json(&message.into_data()) {
