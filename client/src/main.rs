@@ -98,7 +98,7 @@ async fn main() {
     env_logger::init();
 
     let url = env::args().nth(1).unwrap_or_else(|| {
-        print!("Please enter the server URL (e.g., 127.0.0.1:12345): ");
+        print!("Please enter the client URL (e.g., 127.0.0.1:12345): ");
         io::stdout().flush().unwrap();
         let mut input = String::new();
         io::stdin()
