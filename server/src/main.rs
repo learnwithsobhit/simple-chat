@@ -208,7 +208,17 @@ async fn main() -> Result<()> {
     let listener = try_socket.expect("Failed to bind");
     let (tx, _) = broadcast::channel::<ServerMessage>(100); // Broadcast channel for messages
     let (tx_close, _) = broadcast::channel::<Message>(100);
-    println!("Listening on: {}", addr);
+    println!("****************************************************************");
+    println!(
+        "* Listening on: {}                                  *",
+        addr
+    );
+    println!("* To connect to chat use below command in separate terminal:   *");
+    println!(
+        "* cargo run --bin client {} <username>              *",
+        addr
+    );
+    println!("****************************************************************");
     loop {
         tokio::select! {
             Ok((stream, addr)) = listener.accept() => {
