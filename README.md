@@ -82,12 +82,12 @@ cargo test
 
 ## Launch server:
 ```
-cargo run --bin server 0.0.0.0:<port>
+cargo run --bin server <ip>:<port>
 ```
 
 ## Launch client:
 ```
-cargo run --bin client ws://<ip>:<port> <username>
+cargo run --bin client <ip>:<port> <username>
 ```
 
 ## GitHub Actions

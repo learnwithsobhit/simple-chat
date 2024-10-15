@@ -17,7 +17,8 @@ use log::{error, info};
 use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
 use std::env;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::io::{self, Write};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::signal;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
@@ -96,20 +97,30 @@ async fn main() {
     // Initialize the logger (you'll need to add this)
     env_logger::init();
 
-    let url = env::args()
-        .nth(1)
-        .unwrap_or_else(|| panic!("this program requires at least one argument"));
+    let url = env::args().nth(1).unwrap_or_else(|| {
+        print!("Please enter the server URL (e.g., 127.0.0.1:12345): ");
+        io::stdout().flush().unwrap();
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
+        input.trim().to_string()
+    });
 
-    let username = env::args()
-        .nth(2)
-        .unwrap_or_else(|| panic!("please provide a username"));
-
-    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
-
-    tokio::spawn(read_stdin(stdin_tx.clone()));
-
+    let username = env::args().nth(2).unwrap_or_else(|| {
+        print!("Please enter your username (e.g., John): ");
+        io::stdout().flush().unwrap();
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
+        input.trim().to_string()
+    });
+    let url = format!("ws://{}", url);
     let (ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
     info!("WebSocket handshake has been successfully completed");
+    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
+    tokio::spawn(read_stdin(stdin_tx.clone()));
     let (stdout_tx, mut stdout_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     tokio::spawn(async move {
         while let Some(message) = stdout_rx.recv().await {
@@ -182,17 +193,35 @@ async fn main() {
 }
 
 async fn read_stdin(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
-    let mut stdin = tokio::io::stdin();
+    let stdin = tokio::io::stdin();
+    let mut reader = BufReader::new(stdin);
+    let mut buffer = String::new();
     loop {
-        let mut buf = vec![0; 1024];
-        let n = match stdin.read(&mut buf).await {
-            Err(_) | Ok(0) => break,
-            Ok(n) => n,
-        };
-        buf.truncate(n);
-        let message = ClientMessage::parse(&String::from_utf8(buf).unwrap()).unwrap();
-        tx.send(Message::binary(message.to_json().unwrap()))
-            .unwrap();
+        buffer.clear();
+        match reader.read_line(&mut buffer).await {
+            Ok(0) => continue, // EOF
+            Ok(_) => {
+                if buffer.trim().is_empty() {
+                    continue;
+                }
+                let input = buffer.trim();
+                ClientMessage::parse(input).map_or_else(
+                    |error| error!("Failed to parse message: {}", error.to_string()),
+                    |message| {
+                        message.to_json().map_or_else(
+                            |error| error!("Failed to serialize message: {}", error.to_string()),
+                            |serialized| {
+                                tx.send(Message::binary(serialized)).unwrap();
+                            },
+                        );
+                    },
+                );
+            }
+            Err(e) => {
+                error!("Failed to read from stdin: {}", e);
+                continue;
+            }
+        }
     }
 }
 
