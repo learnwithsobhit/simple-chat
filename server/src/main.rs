@@ -361,7 +361,7 @@ mod tests {
         };
         let serialized = bincode::serialize(&join_msg).unwrap();
         alice_write.send(Message::Binary(serialized)).await.unwrap();
-
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         // Bob joins
         let join_msg = ClientMessage::Join {
             username: "Bob".to_string(),
