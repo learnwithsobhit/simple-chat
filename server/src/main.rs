@@ -190,7 +190,7 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let addr = env::args().nth(1).unwrap_or_else(|| {
-        print!("Please enter the server URL (e.g., 0.0.0.0:12345): ");
+        print!("Please enter the client URL (e.g., 127.0.0.1:12345): ");
         std::io::stdout().flush().unwrap();
         let mut input = String::new();
         std::io::stdin()
@@ -215,7 +215,7 @@ async fn main() -> Result<()> {
     );
     println!("* To connect to chat use below command in separate terminal:   *");
     println!(
-        "* cargo run --bin client {} <username>              *",
+        "* cargo run --bin client <ip>:<port> <username>              *",
         addr
     );
     println!("****************************************************************");
