@@ -32,7 +32,7 @@ jobs:
 
     - name: Run client and send test message
       run: |
-        echo "Hello, Server!" | cargo run --bin client ws://127.0.0.1:12345 TestUser &
+        echo "Hello, Server!" | cargo run --bin client 127.0.0.1:12345 TestUser &
         sleep 5  # Give some time for the message to be sent and processed
 
     - name: Check server logs

@@ -26,6 +26,7 @@
 //!
 
 use log::info;
+use std::io::Write;
 use std::{env, net::SocketAddr, sync::Arc};
 
 use bincode::Result;
@@ -174,9 +175,16 @@ async fn handle_connection(
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
-    let addr = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "0.0.0.0:8080".to_string());
+
+    let addr = env::args().nth(1).unwrap_or_else(|| {
+        print!("Please enter the server URL (e.g., 0.0.0.0:12345): ");
+        std::io::stdout().flush().unwrap();
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
+        input.trim().to_string()
+    });
 
     let state = Arc::new(DashMap::new());
     // Create the event loop and TCP listener we'll accept connections on.
