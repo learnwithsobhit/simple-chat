@@ -167,7 +167,6 @@ async fn handle_connection(
                         .send(message)
                         .await;
                     peer_map.remove(&addr);
-                    info!("Server shutdown");
                     let _ = outgoing.close().await;
                     break;
                 }
@@ -210,18 +209,6 @@ async fn main() -> Result<()> {
     let (tx, _) = broadcast::channel::<ServerMessage>(100); // Broadcast channel for messages
     let (tx_close, _) = broadcast::channel::<Message>(100);
     println!("Listening on: {}", addr);
-    // tokio::spawn(handle_ctrl_c(tx_close.clone()));
-    // Let's spawn the handling of each connection in a separate task.
-    // while let Ok((stream, addr)) = listener.accept().await {
-    //     tokio::spawn(handle_connection(
-    //         state.clone(),
-    //         stream,
-    //         addr,
-    //         tx.clone(),
-    //         tx_close.clone(),
-    //     ));
-    // }
-    // println!("Server shutdown");
     loop {
         tokio::select! {
             Ok((stream, addr)) = listener.accept() => {
@@ -246,8 +233,6 @@ async fn handle_ctrl_c(tx_close: broadcast::Sender<Message>) {
     signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
     info!("Received Ctrl+C, sending leave message.");
     let _ = tx_close.send(Message::Close(None));
-    // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    // std::process::exit(0);
 }
 
 #[cfg(test)]
