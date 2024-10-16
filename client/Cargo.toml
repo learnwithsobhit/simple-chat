@@ -11,7 +11,7 @@ log = "0.4.22"
 serde = {version = "1.0.210",features = ["derive"]}
 tokio = { version = "1.40.0", features = ["full"] }
 tokio-tungstenite = "0.24.0"
-
+common = { path = "../common" }
 [dev-dependencies]
 tokio-test = "0.4.4"
 futures = "0.3.31"

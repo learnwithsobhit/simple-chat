@@ -30,55 +30,15 @@ use std::io::Write;
 use std::{env, net::SocketAddr, sync::Arc};
 
 use bincode::Result;
+use common::utils::{ClientMessage, ServerMessage};
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
 use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::protocol::Message;
+
 type PeerMap = Arc<DashMap<SocketAddr, String>>;
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-enum ClientMessage {
-    Join { username: String },
-    Send { message: String },
-    Leave,
-}
-
-impl ClientMessage {
-    fn from_json(json: &[u8]) -> Result<Self> {
-        bincode::deserialize(json)
-    }
-
-    fn parse(&self, user: &String) -> ServerMessage {
-        match self {
-            ClientMessage::Join { username } => ServerMessage {
-                from: username.clone(),
-                message: "joined the chat".to_string(),
-            },
-            ClientMessage::Send { message } => ServerMessage {
-                from: user.to_string(),
-                message: message.clone(),
-            },
-            ClientMessage::Leave => ServerMessage {
-                from: user.to_string(),
-                message: "left the chat".to_string(),
-            },
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-struct ServerMessage {
-    from: String,
-    message: String,
-}
-
-impl ServerMessage {
-    fn to_json(&self) -> Result<Vec<u8>> {
-        bincode::serialize(self)
-    }
-}
 
 async fn handle_connection(
     peer_map: PeerMap,
@@ -103,7 +63,7 @@ async fn handle_connection(
                 if msg.is_close() {
                     info!("{} disconnected", addr);
                     if let Some(username) = peer_map.get(&addr) {
-                        let _ = tx.send(ClientMessage::Leave.parse(&username));
+                        let _ = tx.send(ClientMessage::Leave.parse_to_server_message(&username));
                     }
                     peer_map.remove(&addr);
                     let _ = outgoing.close().await;
@@ -113,7 +73,7 @@ async fn handle_connection(
                 let msg: ClientMessage = ClientMessage::from_json(&msg.into_data()).unwrap();
                 if msg == ClientMessage::Leave {
                     if let Some(username) = peer_map.get(&addr) {
-                        let _ = tx.send(msg.parse(&username));
+                        let _ = tx.send(msg.parse_to_server_message(&username));
                     }
                     peer_map.remove(&addr);
                 }
@@ -140,13 +100,13 @@ async fn handle_connection(
                                 .send(Message::text(welcome_message))
                                 .await;
                             if let Some(username) = peer_map.get(&addr) {
-                                let _ = tx.send(msg.parse(&username));
+                                let _ = tx.send(msg.parse_to_server_message(&username));
                             }
                         }
 
 
                 } else if let Some(username) = peer_map.get(&addr) {
-                        let _ = tx.send(msg.parse(&username));
+                        let _ = tx.send(msg.parse_to_server_message(&username));
                 }
             },
 
@@ -174,7 +134,7 @@ async fn handle_connection(
 
             else => {
                 if let Some(username) = peer_map.get(&addr) {
-                    let _ = tx.send(ClientMessage::Leave.parse(&username));
+                    let _ = tx.send(ClientMessage::Leave.parse_to_server_message(&username));
                     info!("{:?} disconnected", username);
                 }
                 peer_map.remove(&addr);
@@ -274,7 +234,7 @@ mod tests {
         let join_msg = ClientMessage::Join {
             username: "Alice".to_string(),
         };
-        let parsed = join_msg.parse(&"Alice".to_string());
+        let parsed = join_msg.parse_to_server_message(&"Alice".to_string());
         assert_eq!(
             parsed,
             ServerMessage {
@@ -286,7 +246,7 @@ mod tests {
         let send_msg = ClientMessage::Send {
             message: "Hello, world!".to_string(),
         };
-        let parsed = send_msg.parse(&"Bob".to_string());
+        let parsed = send_msg.parse_to_server_message(&"Bob".to_string());
         assert_eq!(
             parsed,
             ServerMessage {
@@ -296,7 +256,7 @@ mod tests {
         );
 
         let leave_msg = ClientMessage::Leave;
-        let parsed = leave_msg.parse(&"Charlie".to_string());
+        let parsed = leave_msg.parse_to_server_message(&"Charlie".to_string());
         assert_eq!(
             parsed,
             ServerMessage {

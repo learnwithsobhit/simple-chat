@@ -11,87 +11,16 @@
 //! - Handling of stdin for user input and stdout for displaying messages
 //! - Graceful shutdown on Ctrl+C
 
-use bincode::Result;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
-use serde::de::Error as SerdeError;
-use serde::{Deserialize, Serialize};
 use std::env;
 use std::io::{self, Write};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::signal;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-enum ClientMessage {
-    Join { username: String },
-    Send { message: String },
-    Leave,
-}
+use common::utils::{ClientMessage, ServerMessage};
 
-impl ClientMessage {
-    fn from_json(json: &[u8]) -> Result<Self> {
-        bincode::deserialize(json)
-    }
-
-    fn to_json(&self) -> Result<Vec<u8>> {
-        bincode::serialize(self)
-    }
-
-    fn parse(json: &str) -> Result<Self> {
-        let parts: Vec<&str> = json.split_whitespace().collect();
-        match parts[0].to_lowercase().as_str() {
-            "join" => {
-                if parts.len() == 2 {
-                    Ok(ClientMessage::Join {
-                        username: parts[1].to_string(),
-                    })
-                } else {
-                    Err(bincode::Error::custom("Invalid join message format"))
-                }
-            }
-            "send" => {
-                if parts.len() > 1 {
-                    Ok(ClientMessage::Send {
-                        message: parts[1..].join(" "),
-                    })
-                } else {
-                    Err(bincode::Error::custom("Invalid send message format"))
-                }
-            }
-            "leave" => {
-                if parts.len() == 1 {
-                    Ok(ClientMessage::Leave)
-                } else {
-                    Err(bincode::Error::custom("Invalid leave message format"))
-                }
-            }
-            _ => {
-                if parts[0] == "send" {
-                    Ok(ClientMessage::Send {
-                        message: parts[1..].join(" "),
-                    })
-                } else {
-                    Ok(ClientMessage::Send {
-                        message: parts[0..].join(" "),
-                    })
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ServerMessage {
-    from: String,
-    message: String,
-}
-
-impl ServerMessage {
-    fn from_json(json: &[u8]) -> Result<Self> {
-        bincode::deserialize(json)
-    }
-}
 #[tokio::main]
 async fn main() {
     // Initialize the logger (you'll need to add this)
