@@ -25,14 +25,12 @@
 //! ```
 //!
 
-use log::info;
-use std::io::Write;
-use std::{env, net::SocketAddr, sync::Arc};
-
-use bincode::Result;
 use common::utils::{ClientMessage, ServerMessage};
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
+use log::info;
+use std::io::Write;
+use std::{env, net::SocketAddr, sync::Arc};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
 use tokio::sync::broadcast;
@@ -146,7 +144,7 @@ async fn handle_connection(
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     env_logger::init();
 
     let addr = env::args().nth(1).unwrap_or_else(|| {
@@ -193,7 +191,6 @@ async fn main() -> Result<()> {
             }
         }
     }
-    Ok(())
 }
 
 async fn handle_ctrl_c(tx_close: broadcast::Sender<Message>) {
@@ -212,19 +209,19 @@ mod tests {
         let join_msg = ClientMessage::Join {
             username: "Alice".to_string(),
         };
-        let serialized = bincode::serialize(&join_msg).unwrap();
+        let serialized = join_msg.to_json().unwrap();
         let deserialized: ClientMessage = ClientMessage::from_json(&serialized).unwrap();
         assert_eq!(join_msg, deserialized);
 
         let send_msg = ClientMessage::Send {
             message: "Hello, world!".to_string(),
         };
-        let serialized = bincode::serialize(&send_msg).unwrap();
+        let serialized = send_msg.to_json().unwrap();
         let deserialized: ClientMessage = ClientMessage::from_json(&serialized).unwrap();
         assert_eq!(send_msg, deserialized);
 
         let leave_msg = ClientMessage::Leave;
-        let serialized = bincode::serialize(&leave_msg).unwrap();
+        let serialized = leave_msg.to_json().unwrap();
         let deserialized: ClientMessage = ClientMessage::from_json(&serialized).unwrap();
         assert_eq!(leave_msg, deserialized);
     }
@@ -273,7 +270,7 @@ mod tests {
             message: "Hello, everyone!".to_string(),
         };
         let serialized = msg.to_json().unwrap();
-        let deserialized: ServerMessage = bincode::deserialize(&serialized).unwrap();
+        let deserialized: ServerMessage = ServerMessage::from_json(&serialized).unwrap();
         assert_eq!(msg, deserialized);
     }
 
@@ -304,7 +301,7 @@ mod tests {
         let join_msg = ClientMessage::Join {
             username: "TestUser".to_string(),
         };
-        let serialized = bincode::serialize(&join_msg).unwrap();
+        let serialized = join_msg.to_json().unwrap();
         write.send(Message::Binary(serialized)).await.unwrap();
         let welcome_message = "Welcome to the chat, TestUser!\n\nYou can interact with Server as follows:\n1. leave - to leave from room.\n2. join <username> - to join to room.\n3. send <MSG> or <MSG> - to send message in the room";
         // Receive the welcome message
@@ -318,11 +315,11 @@ mod tests {
         let send_msg = ClientMessage::Send {
             message: "Hello, chat!".to_string(),
         };
-        let serialized = bincode::serialize(&send_msg).unwrap();
+        let serialized = send_msg.to_json().unwrap();
         write.send(Message::Binary(serialized)).await.unwrap();
         // Test leaving the chat
         let leave_msg = ClientMessage::Leave;
-        let serialized = bincode::serialize(&leave_msg).unwrap();
+        let serialized = leave_msg.to_json().unwrap();
         write.send(Message::Binary(serialized)).await.unwrap();
 
         // Close the connection
@@ -366,14 +363,14 @@ mod tests {
         let join_msg = ClientMessage::Join {
             username: "Alice".to_string(),
         };
-        let serialized = bincode::serialize(&join_msg).unwrap();
+        let serialized = join_msg.to_json().unwrap();
         alice_write.send(Message::Binary(serialized)).await.unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         // Bob joins
         let join_msg = ClientMessage::Join {
             username: "Bob".to_string(),
         };
-        let serialized = bincode::serialize(&join_msg).unwrap();
+        let serialized = join_msg.to_json().unwrap();
         bob_write.send(Message::Binary(serialized)).await.unwrap();
 
         // Receive welcome messages
@@ -382,7 +379,7 @@ mod tests {
 
         // Alice should receive Bob's message about joining
         if let Some(Ok(Message::Binary(msg))) = alice_read.next().await {
-            let server_msg: ServerMessage = bincode::deserialize(&msg).unwrap();
+            let server_msg: ServerMessage = ServerMessage::from_json(&msg).unwrap();
             assert_eq!(server_msg.from, "Bob");
             assert_eq!(server_msg.message, "joined the chat");
         } else {
@@ -393,11 +390,11 @@ mod tests {
         let send_msg = ClientMessage::Send {
             message: "Hello, Bob!".to_string(),
         };
-        let serialized = bincode::serialize(&send_msg).unwrap();
+        let serialized = send_msg.to_json().unwrap();
         alice_write.send(Message::Binary(serialized)).await.unwrap();
         // Bob should receive Alice's message
         if let Some(Ok(Message::Binary(msg))) = bob_read.next().await {
-            let server_msg: ServerMessage = bincode::deserialize(&msg).unwrap();
+            let server_msg: ServerMessage = ServerMessage::from_json(&msg).unwrap();
             assert_eq!(server_msg.from, "Alice");
             assert_eq!(server_msg.message, "Hello, Bob!");
         } else {

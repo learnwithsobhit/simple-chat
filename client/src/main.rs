@@ -65,7 +65,7 @@ async fn main() {
     let join_msg = ClientMessage::Join {
         username: username.to_string(),
     };
-    let join_msg = bincode::serialize(&join_msg).unwrap();
+    let join_msg = join_msg.to_json().unwrap();
     {
         if let Err(e) = write
             .send(tokio_tungstenite::tungstenite::Message::Binary(join_msg))
@@ -287,7 +287,7 @@ mod tests {
             from: "Server".to_string(),
             message: "Welcome to the chat!".to_string(),
         };
-        let serialized = bincode::serialize(&server_message).unwrap();
+        let serialized = server_message.to_json().unwrap();
         let deserialized = ServerMessage::from_json(&serialized).unwrap();
         assert_eq!(server_message.from, deserialized.from);
         assert_eq!(server_message.message, deserialized.message);
