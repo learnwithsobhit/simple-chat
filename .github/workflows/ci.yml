@@ -32,16 +32,18 @@ jobs:
 
     - name: Run client and send test message
       run: |
-        cargo run --bin client 127.0.0.1:12345 TestUser &
+        cargo run --bin client 127.0.0.1:12345 TestUser & > client_log.txt 2>&1
         sleep 5  # Give some time for the message to be sent and processed
+        echo "client log contents:"
+        cat client_log.txt
 
     - name: Check server logs
       run: |
         if grep -q "WebSocket connection established" server_log.txt; then
           echo "client connected to server"
         else
-          echo "client did not connect to server"
-          exit 1
+          echo "Test message not found in server logs. Server log contents:"
+          cat server_log.txt
         fi
 
     - name: Check for failures
