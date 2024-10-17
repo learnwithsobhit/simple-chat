@@ -24,6 +24,9 @@ jobs:
         cargo build --bin server
         cargo build --bin client
 
+    - name: Set log level
+      run: export RUST_LOG=info
+
     - name: Run server
       run: cargo run --bin server 0.0.0.00:12345 > server_log.txt 2>&1 &
       
@@ -36,6 +39,7 @@ jobs:
         sleep 5  # Give some time for the message to be sent and processed
         echo "client log contents:"
         cat client_log.txt
+
 
     - name: Check server logs
       run: |
