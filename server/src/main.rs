@@ -30,10 +30,12 @@ use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use log::info;
 use std::io::Write;
+use std::time::{Duration, Instant};
 use std::{env, net::SocketAddr, sync::Arc};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
 use tokio::sync::broadcast;
+use tokio::time::interval;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 type PeerMap = Arc<DashMap<SocketAddr, String>>;
@@ -55,6 +57,10 @@ async fn handle_connection(
     let mut rx = tx.subscribe(); // Each client gets a subscription
     let mut rx_close = tx_close.subscribe();
     let (mut outgoing, mut incoming) = ws_stream.split();
+    let mut last_heartbeat = Instant::now();
+    let heartbeat_interval = Duration::from_secs(3);
+    let mut heartbeat_check = interval(Duration::from_secs(1)); // Check every second
+
     loop {
         tokio::select! {
             Some(Ok(msg)) = incoming.next() => {
@@ -75,6 +81,10 @@ async fn handle_connection(
                             let _ = tx.send(msg.parse_to_server_message(&username));
                         }
                         peer_map.remove(&addr);
+                    }
+                    if msg == ClientMessage::Heartbeat {
+                        last_heartbeat = Instant::now();
+                        continue;
                     }
                     if let ClientMessage::Join { username } = msg.clone() {
                         if peer_map.iter().any(|entry| entry.value() == &username) {
@@ -129,7 +139,17 @@ async fn handle_connection(
                     break;
                 }
             }
-
+            _ = heartbeat_check.tick() => {
+                if last_heartbeat.elapsed() > heartbeat_interval {
+                    info!("No heartbeat received from {} in 30 seconds, closing connection", addr);
+                    if let Some(username) = peer_map.get(&addr) {
+                        let _ = tx.send(ClientMessage::Leave.parse_to_server_message(&username));
+                    }
+                    peer_map.remove(&addr);
+                    let _ = outgoing.close().await;
+                    break;
+                }
+            }
             else => {
                 if let Some(username) = peer_map.get(&addr) {
                     let _ = tx.send(ClientMessage::Leave.parse_to_server_message(&username));
