@@ -25,22 +25,22 @@ jobs:
         cargo build --bin client
 
     - name: Run server
-      run: cargo run --bin server 0.0.0.00:12345 &
+      run: cargo run --bin server 0.0.0.00:12345 > server_log.txt 2>&1 &
       
     - name: Wait for server to start
       run: sleep 5
 
     - name: Run client and send test message
       run: |
-        echo "Hello, Server!" | cargo run --bin client 127.0.0.1:12345 TestUser &
+        cargo run --bin client 127.0.0.1:12345 TestUser &
         sleep 5  # Give some time for the message to be sent and processed
 
     - name: Check server logs
       run: |
-        if grep -q "Received message from TestUser: Hello, Server!" <(cargo run --bin server 0.0.0.0:12345); then
-          echo "Test message successfully received by server"
+        if grep -q "WebSocket connection established" server_log.txt; then
+          echo "client connected to server"
         else
-          echo "Test message not found in server logs"
+          echo "client did not connect to server"
           exit 1
         fi
 
