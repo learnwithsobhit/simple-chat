@@ -20,15 +20,16 @@ jobs:
         toolchain: stable
 
     - name: Build server and client
-      run: |
-        cargo build --bin server
-        cargo build --bin client
+      run: cargo build
+
+    - name: run tests
+      run: cargo test
 
     - name: Set log level
       run: export RUST_LOG=info
 
     - name: Run server
-      run: cargo run --bin server 0.0.0.00:12345 &
+      run: cargo run --bin server 0.0.0.0:12345 &
       
     - name: Wait for server to start
       run: sleep 5
