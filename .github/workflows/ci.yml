@@ -36,8 +36,6 @@ jobs:
     - name: Run client and send test message
       run: |
         cargo run --bin client 127.0.0.1:12345 TestUser > client_log.txt 2>&1 &
-        echo "client log contents:"
-        cat client_log.txt
         sleep 5  # Give some time for the message to be sent and processed
 
     - name: Check client logs
@@ -46,6 +44,7 @@ jobs:
           echo "client connected to server"
         else
           echo "client did not connect to server"
+          cat client_log.txt
           exit 1
         fi
 
@@ -54,4 +53,6 @@ jobs:
         if [ $? -ne 0 ]; then
           echo "Client or server exited with a failure"
           exit 1
+        else
+          echo "Client and server ran successfully"
         fi
