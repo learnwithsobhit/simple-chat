@@ -28,26 +28,25 @@ jobs:
       run: export RUST_LOG=info
 
     - name: Run server
-      run: cargo run --bin server 0.0.0.00:12345 > server_log.txt 2>&1 &
+      run: cargo run --bin server 0.0.0.00:12345 &
       
     - name: Wait for server to start
       run: sleep 5
 
     - name: Run client and send test message
       run: |
-        cargo run --bin client 127.0.0.1:12345 TestUser & > client_log.txt 2>&1
-        sleep 5  # Give some time for the message to be sent and processed
+        cargo run --bin client 127.0.0.1:12345 TestUser > client_log.txt 2>&1 &
         echo "client log contents:"
         cat client_log.txt
+        sleep 5  # Give some time for the message to be sent and processed
 
-
-    - name: Check server logs
+    - name: Check client logs
       run: |
-        if grep -q "WebSocket connection established" server_log.txt; then
+        if grep -q "Welcome to the chat, TestUser!" client_log.txt; then
           echo "client connected to server"
         else
-          echo "Test message not found in server logs. Server log contents:"
-          cat server_log.txt
+          echo "client did not connect to server"
+          exit 1
         fi
 
     - name: Check for failures
