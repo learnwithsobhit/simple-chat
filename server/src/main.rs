@@ -68,43 +68,43 @@ async fn handle_connection(
                     break;
                 }
 
-                let msg: ClientMessage = ClientMessage::from_json(&msg.into_data()).unwrap();
-                if msg == ClientMessage::Leave {
-                    if let Some(username) = peer_map.get(&addr) {
-                        let _ = tx.send(msg.parse_to_server_message(&username));
-                    }
-                    peer_map.remove(&addr);
-                }
-                if let ClientMessage::Join { username } = msg.clone() {
-                    if peer_map.iter().any(|entry| entry.value() == &username) {
-                        let _ = outgoing
-                            .send(Message::text(format!("Sorry, username {} already taken.", username)))
-                            .await;
-                    } else if peer_map.contains_key(&addr) {
-                            let joined_user = peer_map.get(&addr).unwrap().clone();
-                            let _ = outgoing
-                            .send(Message::text(format!("{} already joined in chat ,you can leave and join as {}", joined_user,username)))
-                            .await;
-                        }else{
-                            peer_map.insert(addr, username.clone());
-
-                            // Notify current client of successful join
-                            // Notify current client of successful join with additional instructions
-                            let welcome_message = format!(
-                                "Welcome to the chat, {}!\n\nYou can interact with Server as follows:\n1. leave - to leave from room.\n2. join <username> - to join to room.\n3. send <MSG> or <MSG> - to send message in the room",
-                                username
-                            );
-                            let _ = outgoing
-                                .send(Message::text(welcome_message))
-                                .await;
-                            if let Some(username) = peer_map.get(&addr) {
-                                let _ = tx.send(msg.parse_to_server_message(&username));
-                            }
+                if let Ok(msg) = ClientMessage::from_json(&msg.into_data())
+                {
+                    if msg == ClientMessage::Leave {
+                        if let Some(username) = peer_map.get(&addr) {
+                            let _ = tx.send(msg.parse_to_server_message(&username));
                         }
+                        peer_map.remove(&addr);
+                    }
+                    if let ClientMessage::Join { username } = msg.clone() {
+                        if peer_map.iter().any(|entry| entry.value() == &username) {
+                            let _ = outgoing
+                                .send(Message::text(format!("Sorry, username {} already taken.", username)))
+                                .await;
+                        } else if peer_map.contains_key(&addr) {
+                                let joined_user = peer_map.get(&addr).unwrap().clone();
+                                let _ = outgoing
+                                .send(Message::text(format!("{} already joined in chat ,you can leave and join as {}", joined_user,username)))
+                                .await;
+                            }else{
+                                peer_map.insert(addr, username.clone());
 
-
-                } else if let Some(username) = peer_map.get(&addr) {
-                        let _ = tx.send(msg.parse_to_server_message(&username));
+                                // Notify current client of successful join
+                                // Notify current client of successful join with additional instructions
+                                let welcome_message = format!(
+                                    "Welcome to the chat, {}!\n\nYou can interact with Server as follows:\n1. leave - to leave from room.\n2. join <username> - to join to room.\n3. send <MSG> or <MSG> - to send message in the room",
+                                    username
+                                );
+                                let _ = outgoing
+                                    .send(Message::text(welcome_message))
+                                    .await;
+                                if let Some(username) = peer_map.get(&addr) {
+                                    let _ = tx.send(msg.parse_to_server_message(&username));
+                                }
+                            }
+                        } else if let Some(username) = peer_map.get(&addr) {
+                            let _ = tx.send(msg.parse_to_server_message(&username));
+                    }
                 }
             },
 

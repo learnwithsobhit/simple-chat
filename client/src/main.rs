@@ -54,8 +54,12 @@ async fn main() {
     tokio::spawn(async move {
         while let Some(message) = stdout_rx.recv().await {
             let mut stdout = tokio::io::stdout();
-            stdout.write_all(message.as_bytes()).await.unwrap();
-            stdout.write_all(b"\n").await.unwrap();
+            if let Err(e) = stdout.write_all(message.as_bytes()).await {
+                error!("Failed to write to stdout: {}", e);
+            }
+            if let Err(e) = stdout.write_all(b"\n").await {
+                error!("Failed to write to stdout: {}", e);
+            }
         }
     });
 
@@ -71,17 +75,21 @@ async fn main() {
             .send(tokio_tungstenite::tungstenite::Message::Binary(join_msg))
             .await
         {
-            println!("Failed to send join message: {}", e);
+            error!("Failed to send join message: {}", e);
             return;
         }
     }
     let stdin_to_ws = async {
         while let Some(message) = stdin_rx.recv().await {
-            // println!("Sending message to server: {}", message.to_string());
-            write.send(message.clone()).await.unwrap();
+            if write.send(message.clone()).await.is_err() {
+                error!("Failed to send message to server");
+                return;
+            }
             if let Ok(msg) = ClientMessage::from_json(&message.into_data()) {
                 if msg == ClientMessage::Leave {
-                    write.close().await.unwrap();
+                    if let Err(e) = write.close().await {
+                        error!("Failed to close WebSocket connection: {}", e);
+                    }
                     return;
                 }
             }
@@ -97,16 +105,16 @@ async fn main() {
                 }
                 let server_message = String::from_utf8(message.clone().into_data());
                 if let Ok(msg) = ServerMessage::from_json(&message.into_data()) {
-                    stdout_tx
-                        .send(format!("{}: {}", msg.from, msg.message))
-                        .unwrap();
-                } else {
-                    stdout_tx.send(server_message.unwrap()).unwrap();
+                    if let Err(e) = stdout_tx.send(format!("{}: {}", msg.from, msg.message)) {
+                        error!("Failed to send message to stdout: {}", e);
+                    }
+                } else if let Err(e) = stdout_tx.send(server_message.unwrap()) {
+                    error!("Failed to send message to stdout: {}", e);
                 }
             } else {
                 error!(
                     "Error receiving message from server: {}",
-                    message.err().unwrap()
+                    message.unwrap_err().to_string()
                 );
             }
         })
@@ -140,7 +148,9 @@ async fn read_stdin(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
                         message.to_json().map_or_else(
                             |error| error!("Failed to serialize message: {}", error.to_string()),
                             |serialized| {
-                                tx.send(Message::binary(serialized)).unwrap();
+                                if let Err(e) = tx.send(Message::binary(serialized)) {
+                                    error!("Failed to send message: {}", e);
+                                }
                             },
                         );
                     },
@@ -156,10 +166,16 @@ async fn read_stdin(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
 
 async fn handle_ctrl_c(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
     signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-    info!("Received Ctrl+C, sending leave message.");
+    send_leave_message(tx).await;
+}
+
+async fn send_leave_message(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
+    info!("Sending leave message.");
     let leave_msg = ClientMessage::Leave;
-    tx.send(Message::binary(leave_msg.to_json().unwrap()))
-        .unwrap();
+    if let Err(e) = tx.send(Message::binary(leave_msg.to_json().unwrap())) {
+        error!("Failed to send leave message: {}", e);
+    }
+    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 }
 
 #[cfg(test)]
