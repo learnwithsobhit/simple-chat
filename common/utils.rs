@@ -6,6 +6,7 @@ pub enum ClientMessage {
     Join { username: String },
     Send { message: String },
     Leave,
+    Heartbeat,
 }
 
 impl ClientMessage {
@@ -72,6 +73,10 @@ impl ClientMessage {
             ClientMessage::Leave => ServerMessage {
                 from: user.to_string(),
                 message: "left the chat".to_string(),
+            },
+            ClientMessage::Heartbeat => ServerMessage {
+                from: "server".to_string(),
+                message: "heartbeat".to_string(),
             },
         }
     }
