@@ -15,8 +15,9 @@ use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
 use std::env;
 use std::io::{self, Write};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::signal;
+use tokio::time::interval;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 use common::utils::{ClientMessage, ServerMessage};
@@ -79,18 +80,30 @@ async fn main() {
             return;
         }
     }
+    let heartbeat_interval = Duration::from_secs(1); // Send heartbeat every 30 seconds
+    let mut heartbeat_timer = interval(heartbeat_interval);
+
     let stdin_to_ws = async {
-        while let Some(message) = stdin_rx.recv().await {
-            if write.send(message.clone()).await.is_err() {
-                error!("Failed to send message to server");
-                return;
+        loop {
+            tokio::select! {
+                _ = heartbeat_timer.tick() => {
+                if let Err(e) = write.send(Message::binary(ClientMessage::Heartbeat.to_json().unwrap())).await {
+                    error!("Failed to send heartbeat message: {}", e);
+                }
             }
-            if let Ok(msg) = ClientMessage::from_json(&message.into_data()) {
-                if msg == ClientMessage::Leave {
-                    if let Err(e) = write.close().await {
-                        error!("Failed to close WebSocket connection: {}", e);
-                    }
+            Some(message) = stdin_rx.recv() => {
+                if write.send(message.clone()).await.is_err() {
+                    error!("Failed to send message to server");
                     return;
+                }
+                if let Ok(msg) = ClientMessage::from_json(&message.into_data()) {
+                    if msg == ClientMessage::Leave {
+                        if let Err(e) = write.close().await {
+                            error!("Failed to close WebSocket connection: {}", e);
+                        }
+                        return;
+                    }
+                    }
                 }
             }
         }
@@ -120,7 +133,7 @@ async fn main() {
         })
     };
 
-    tokio::spawn(handle_ctrl_c(stdin_tx.clone()));
+    // tokio::spawn(handle_ctrl_c(stdin_tx.clone()));
     tokio::select! {
         _ = stdin_to_ws => (),
         _ = ws_to_stdout => (),
@@ -164,19 +177,19 @@ async fn read_stdin(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
     }
 }
 
-async fn handle_ctrl_c(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
-    signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-    send_leave_message(tx).await;
-}
+// async fn handle_ctrl_c(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
+//     signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
+//     send_leave_message(tx).await;
+// }
 
-async fn send_leave_message(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
-    info!("Sending leave message.");
-    let leave_msg = ClientMessage::Leave;
-    if let Err(e) = tx.send(Message::binary(leave_msg.to_json().unwrap())) {
-        error!("Failed to send leave message: {}", e);
-    }
-    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-}
+// async fn send_leave_message(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
+//     info!("Sending leave message.");
+//     let leave_msg = ClientMessage::Leave;
+//     if let Err(e) = tx.send(Message::binary(leave_msg.to_json().unwrap())) {
+//         error!("Failed to send leave message: {}", e);
+//     }
+//     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+// }
 
 #[cfg(test)]
 mod tests {
