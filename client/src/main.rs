@@ -134,7 +134,7 @@ async fn main() {
         })
     };
 
-    tokio::spawn(handle_ctrl_c(stdin_tx.clone()));
+    // tokio::spawn(handle_ctrl_c(stdin_tx.clone()));
     tokio::select! {
         _ = stdin_to_ws => (),
         _ = ws_to_stdout => (),
@@ -178,19 +178,19 @@ async fn read_stdin(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
     }
 }
 
-async fn handle_ctrl_c(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
-    signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-    send_leave_message(tx).await;
-}
+// async fn handle_ctrl_c(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
+//     signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
+//     send_leave_message(tx).await;
+// }
 
-async fn send_leave_message(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
-    info!("Sending leave message.");
-    let leave_msg = ClientMessage::Leave;
-    if let Err(e) = tx.send(Message::binary(leave_msg.to_json().unwrap())) {
-        error!("Failed to send leave message: {}", e);
-    }
-    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-}
+// async fn send_leave_message(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
+//     info!("Sending leave message.");
+//     let leave_msg = ClientMessage::Leave;
+//     if let Err(e) = tx.send(Message::binary(leave_msg.to_json().unwrap())) {
+//         error!("Failed to send leave message: {}", e);
+//     }
+//     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+// }
 
 #[cfg(test)]
 mod tests {
