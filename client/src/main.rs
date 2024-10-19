@@ -114,7 +114,8 @@ async fn main() {
             if let Ok(message) = message {
                 if message.is_close() {
                     info!("Server closed the connection");
-                    std::process::exit(0);
+                    // std::process::exit(0);
+                    return;
                 }
                 let server_message = String::from_utf8(message.clone().into_data());
                 if let Ok(msg) = ServerMessage::from_json(&message.into_data()) {
@@ -138,6 +139,10 @@ async fn main() {
         _ = stdin_to_ws => (),
         _ = ws_to_stdout => (),
     }
+    write
+        .close()
+        .await
+        .expect("Failed to close WebSocket connection");
     info!("Exiting");
     std::process::exit(0);
 }
