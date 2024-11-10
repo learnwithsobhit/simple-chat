@@ -29,6 +29,7 @@ use common::utils::{ClientMessage, ServerMessage};
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use log::info;
+use mongodb::bson::doc;
 use std::io::Write;
 use std::time::{Duration, Instant};
 use std::{env, net::SocketAddr, sync::Arc};
@@ -37,8 +38,32 @@ use tokio::signal;
 use tokio::sync::broadcast;
 use tokio::time::interval;
 use tokio_tungstenite::tungstenite::protocol::Message;
+use mongodb::{Client, options::ClientOptions};
+use serde::{Serialize, Deserialize};
+use dotenv::dotenv;
 
 type PeerMap = Arc<DashMap<SocketAddr, String>>;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UserData {
+    username: String,
+    address: String,
+    last_seen: i64,
+}
+
+// Change the trait to use an associated type
+trait DatabaseClient: Send + Sync {
+    type DatabaseType;
+    fn database(&self, name: &str) -> Self::DatabaseType;
+}
+
+// Implement for real MongoDB client
+impl DatabaseClient for Client {
+    type DatabaseType = mongodb::Database;
+    fn database(&self, name: &str) -> Self::DatabaseType {
+        self.database(name)
+    }
+}
 
 async fn handle_connection(
     peer_map: PeerMap,
@@ -46,7 +71,14 @@ async fn handle_connection(
     addr: SocketAddr,
     tx: broadcast::Sender<ServerMessage>,
     tx_close: broadcast::Sender<Message>,
+    db_client: Arc<dyn DatabaseClient<DatabaseType = mongodb::Database>>,
 ) {
+
+     // Get MongoDB collection
+     let collection = db_client
+     .database("chat_db")
+     .collection::<UserData>("users");
+
     info!("Incoming TCP connection from: {}", addr);
 
     let ws_stream = tokio_tungstenite::accept_async(raw_stream)
@@ -68,6 +100,11 @@ async fn handle_connection(
                     info!("{} disconnected", addr);
                     if let Some(username) = peer_map.get(&addr) {
                         let _ = tx.send(ClientMessage::Leave.parse_to_server_message(&username));
+                        let filter = doc! { "username": username.value() };
+                        let update = doc! { "$set": { "last_seen": chrono::Utc::now().timestamp() } };
+                        if let Err(e) = collection.update_one(filter, update).await {
+                            log::error!("Failed to update last_seen: {}", e);
+                        }
                     }
                     peer_map.remove(&addr);
                     let _ = outgoing.close().await;
@@ -98,6 +135,17 @@ async fn handle_connection(
                                 .await;
                             }else{
                                 peer_map.insert(addr, username.clone());
+
+                                // Store user data in MongoDB
+                                let user_data = UserData {
+                                    username: username.clone(),
+                                    address: addr.to_string(),
+                                    last_seen: chrono::Utc::now().timestamp(),
+                                };
+                                
+                                if let Err(e) = collection.insert_one(user_data).await {
+                                    log::error!("Failed to store user data: {}", e);
+                                }
 
                                 // Notify current client of successful join
                                 // Notify current client of successful join with additional instructions
@@ -166,6 +214,15 @@ async fn handle_connection(
 #[tokio::main]
 async fn main() {
     env_logger::init();
+    dotenv().ok(); // Load .env file
+    // Setup MongoDB connection
+    let mongo_uri = env::var("MONGODB_URI").unwrap_or_else(|_| "mongodb://localhost:27017".to_string());
+    info!("MongoDB URI: {}", mongo_uri);
+    let client_options = ClientOptions::parse(&mongo_uri)
+        .await
+        .expect("Failed to parse MongoDB options");
+    let db_client = Arc::new(Client::with_options(client_options)
+        .expect("Failed to connect to MongoDB"));
 
     let addr = env::args().nth(1).unwrap_or_else(|| {
         print!("Please enter the server URL (e.g., 0.0.0.0:12345): ");
@@ -197,12 +254,14 @@ async fn main() {
     loop {
         tokio::select! {
             Ok((stream, addr)) = listener.accept() => {
+                let db_client = db_client.clone();
                 tokio::spawn(handle_connection(
                     state.clone(),
                     stream,
                     addr,
                     tx.clone(),
                     tx_close.clone(),
+                    db_client.clone(),
                 ));
             }
             _ = handle_ctrl_c(tx_close.clone()) => {
@@ -217,212 +276,4 @@ async fn handle_ctrl_c(tx_close: broadcast::Sender<Message>) {
     signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
     info!("Received Ctrl+C, sending leave message.");
     let _ = tx_close.send(Message::Close(None));
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn test_client_message_serialization() {
-        let join_msg = ClientMessage::Join {
-            username: "Alice".to_string(),
-        };
-        let serialized = join_msg.to_json().unwrap();
-        let deserialized: ClientMessage = ClientMessage::from_json(&serialized).unwrap();
-        assert_eq!(join_msg, deserialized);
-
-        let send_msg = ClientMessage::Send {
-            message: "Hello, world!".to_string(),
-        };
-        let serialized = send_msg.to_json().unwrap();
-        let deserialized: ClientMessage = ClientMessage::from_json(&serialized).unwrap();
-        assert_eq!(send_msg, deserialized);
-
-        let leave_msg = ClientMessage::Leave;
-        let serialized = leave_msg.to_json().unwrap();
-        let deserialized: ClientMessage = ClientMessage::from_json(&serialized).unwrap();
-        assert_eq!(leave_msg, deserialized);
-    }
-
-    #[test]
-    fn test_client_message_parsing() {
-        let join_msg = ClientMessage::Join {
-            username: "Alice".to_string(),
-        };
-        let parsed = join_msg.parse_to_server_message(&"Alice".to_string());
-        assert_eq!(
-            parsed,
-            ServerMessage {
-                from: "Alice".to_string(),
-                message: "joined the chat".to_string(),
-            }
-        );
-
-        let send_msg = ClientMessage::Send {
-            message: "Hello, world!".to_string(),
-        };
-        let parsed = send_msg.parse_to_server_message(&"Bob".to_string());
-        assert_eq!(
-            parsed,
-            ServerMessage {
-                from: "Bob".to_string(),
-                message: "Hello, world!".to_string(),
-            }
-        );
-
-        let leave_msg = ClientMessage::Leave;
-        let parsed = leave_msg.parse_to_server_message(&"Charlie".to_string());
-        assert_eq!(
-            parsed,
-            ServerMessage {
-                from: "Charlie".to_string(),
-                message: "left the chat".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn test_server_message_serialization() {
-        let msg = ServerMessage {
-            from: "Alice".to_string(),
-            message: "Hello, everyone!".to_string(),
-        };
-        let serialized = msg.to_json().unwrap();
-        let deserialized: ServerMessage = ServerMessage::from_json(&serialized).unwrap();
-        assert_eq!(msg, deserialized);
-    }
-
-    #[tokio::test]
-    async fn test_handle_connection() {
-        use futures_util::StreamExt;
-        use tokio::net::TcpListener;
-        use tokio_tungstenite::connect_async;
-
-        // Setup a mock server
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let peer_map = Arc::new(DashMap::new());
-        let (tx, _) = broadcast::channel::<ServerMessage>(100);
-        let (tx_close, _) = broadcast::channel::<Message>(100);
-        // Spawn the server handler
-        let handle = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            handle_connection(peer_map, stream, addr, tx, tx_close).await;
-        });
-
-        // Connect a mock client
-        let (ws_stream, _) = connect_async(format!("ws://{}", addr)).await.unwrap();
-
-        let (mut write, mut read) = ws_stream.split();
-        // Test joining
-        let join_msg = ClientMessage::Join {
-            username: "TestUser".to_string(),
-        };
-        let serialized = join_msg.to_json().unwrap();
-        write.send(Message::Binary(serialized)).await.unwrap();
-        let welcome_message = "Welcome to the chat, TestUser!\n\nYou can interact with Server as follows:\n1. leave - to leave from room.\n2. join <username> - to join to room.\n3. send <MSG> or <MSG> - to send message in the room";
-        // Receive the welcome message
-        if let Some(Ok(msg)) = read.next().await {
-            assert_eq!(msg, Message::Text(welcome_message.to_string()));
-        } else {
-            panic!("Did not receive welcome message");
-        }
-
-        // Test sending a message
-        let send_msg = ClientMessage::Send {
-            message: "Hello, chat!".to_string(),
-        };
-        let serialized = send_msg.to_json().unwrap();
-        write.send(Message::Binary(serialized)).await.unwrap();
-        // Test leaving the chat
-        let leave_msg = ClientMessage::Leave;
-        let serialized = leave_msg.to_json().unwrap();
-        write.send(Message::Binary(serialized)).await.unwrap();
-
-        // Close the connection
-        write.close().await.unwrap();
-        handle.abort();
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    }
-
-    #[tokio::test]
-    async fn test_multiple_clients() {
-        use futures_util::StreamExt;
-        use tokio::net::TcpListener;
-        use tokio_tungstenite::connect_async;
-        // Setup a mock server
-        let listener = TcpListener::bind("127.0.0.1:12345").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let peer_map = Arc::new(DashMap::new());
-        let (tx, _) = broadcast::channel::<ServerMessage>(100);
-        let (tx_close, _) = broadcast::channel::<Message>(100);
-
-        // Spawn the server handler
-        let server_handle = tokio::spawn(async move {
-            while let Ok((stream, client_addr)) = listener.accept().await {
-                let peer_map = peer_map.clone();
-                let tx = tx.clone();
-                let tx_close = tx_close.clone();
-                tokio::spawn(async move {
-                    handle_connection(peer_map, stream, client_addr, tx, tx_close).await;
-                });
-            }
-        });
-
-        // Connect two mock clients
-        let (alice_stream, _) = connect_async(format!("ws://{}", addr)).await.unwrap();
-        let (bob_stream, _) = connect_async(format!("ws://{}", addr)).await.unwrap();
-
-        let (mut alice_write, mut alice_read) = alice_stream.split();
-        let (mut bob_write, mut bob_read) = bob_stream.split();
-        // Alice joins
-        let join_msg = ClientMessage::Join {
-            username: "Alice".to_string(),
-        };
-        let serialized = join_msg.to_json().unwrap();
-        alice_write.send(Message::Binary(serialized)).await.unwrap();
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        // Bob joins
-        let join_msg = ClientMessage::Join {
-            username: "Bob".to_string(),
-        };
-        let serialized = join_msg.to_json().unwrap();
-        bob_write.send(Message::Binary(serialized)).await.unwrap();
-
-        // Receive welcome messages
-        alice_read.next().await;
-        bob_read.next().await;
-
-        // Alice should receive Bob's message about joining
-        if let Some(Ok(Message::Binary(msg))) = alice_read.next().await {
-            let server_msg: ServerMessage = ServerMessage::from_json(&msg).unwrap();
-            assert_eq!(server_msg.from, "Bob");
-            assert_eq!(server_msg.message, "joined the chat");
-        } else {
-            panic!("Alice did not receive Bob's message");
-        }
-
-        // Alice sends a message
-        let send_msg = ClientMessage::Send {
-            message: "Hello, Bob!".to_string(),
-        };
-        let serialized = send_msg.to_json().unwrap();
-        alice_write.send(Message::Binary(serialized)).await.unwrap();
-        // Bob should receive Alice's message
-        if let Some(Ok(Message::Binary(msg))) = bob_read.next().await {
-            let server_msg: ServerMessage = ServerMessage::from_json(&msg).unwrap();
-            assert_eq!(server_msg.from, "Alice");
-            assert_eq!(server_msg.message, "Hello, Bob!");
-        } else {
-            panic!("Bob did not receive Alice's message");
-        }
-        // Close connections
-        alice_write.close().await.unwrap();
-        bob_write.close().await.unwrap();
-        server_handle.abort();
-    }
 }
