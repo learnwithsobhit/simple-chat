@@ -74,7 +74,7 @@ async fn handle_connection(
     tx_close: broadcast::Sender<Message>,
     db_client: Arc<dyn DatabaseClient<DatabaseType = mongodb::Database>>,
 ) {
-
+    info!("Creating index for username");
      // Get MongoDB collection
      let collection = db_client
      .database("chat_db")
