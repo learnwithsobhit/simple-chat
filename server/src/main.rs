@@ -30,6 +30,7 @@ use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use log::info;
 use mongodb::bson::doc;
+use mongodb::IndexModel;
 use std::io::Write;
 use std::time::{Duration, Instant};
 use std::{env, net::SocketAddr, sync::Arc};
@@ -78,6 +79,12 @@ async fn handle_connection(
      let collection = db_client
      .database("chat_db")
      .collection::<UserData>("users");
+     collection
+        .create_index(
+            IndexModel::builder().keys(doc! { "username": 1 }).build(),
+        )
+    .await
+    .expect("Failed to create index");
 
     info!("Incoming TCP connection from: {}", addr);
 
