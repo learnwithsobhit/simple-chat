@@ -52,6 +52,14 @@ struct UserData {
     last_seen: i64,
 }
 
+// Add this new struct for message storage
+#[derive(Debug, Serialize, Deserialize)]
+struct ChatMessage {
+    from: String,
+    content: String,
+    timestamp: i64,
+}
+
 // Change the trait to use an associated type
 trait DatabaseClient: Send + Sync {
     type DatabaseType;
@@ -85,6 +93,10 @@ async fn handle_connection(
         )
     .await
     .expect("Failed to create index");
+
+    let collection_messages = db_client
+        .database("chat_db")
+        .collection::<ChatMessage>("messages");
 
     info!("Incoming TCP connection from: {}", addr);
 
@@ -123,6 +135,11 @@ async fn handle_connection(
                     if msg == ClientMessage::Leave {
                         if let Some(username) = peer_map.get(&addr) {
                             let _ = tx.send(msg.parse_to_server_message(&username));
+                            let filter = doc! { "username": username.value() };
+                        let update = doc! { "$set": { "last_seen": chrono::Utc::now().timestamp() } };
+                        if let Err(e) = collection.update_one(filter, update).await {
+                                log::error!("Failed to update last_seen: {}", e);
+                            }
                         }
                         peer_map.remove(&addr);
                     }
@@ -168,6 +185,20 @@ async fn handle_connection(
                                 }
                             }
                         } else if let Some(username) = peer_map.get(&addr) {
+                             // Add this block to store messages
+                        if let ClientMessage::Send { message } = &msg {
+                            if let Some(username) = peer_map.get(&addr) {
+                                let chat_message = ChatMessage {
+                                    from: username.clone(),
+                                    content: message.clone(),
+                                    timestamp: chrono::Utc::now().timestamp(),
+                                };
+                                
+                                    if let Err(e) = collection_messages.insert_one(chat_message).await {
+                                    log::error!("Failed to store message: {}", e);
+                                }
+                                }
+                            }
                             let _ = tx.send(msg.parse_to_server_message(&username));
                     }
                 }
